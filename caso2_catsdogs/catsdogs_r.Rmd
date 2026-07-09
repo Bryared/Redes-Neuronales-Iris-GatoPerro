@@ -1,6 +1,6 @@
 ---
 title: "Caso 2 - Clasificación de imágenes Dogs vs Cats con Keras (R)"
-author: "Bryan Vargas"
+author: "Vargas Maldonado, Bryan Edgar Yared; Escobar Champi, Claudia María"
 date: "`r Sys.Date()`"
 output:
   html_document:
