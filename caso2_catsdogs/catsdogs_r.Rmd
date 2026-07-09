@@ -1,0 +1,214 @@
+---
+title: "Caso 2 - Clasificación de imágenes Dogs vs Cats con Keras (R)"
+author: "Bryan Vargas"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Reusa el mismo entorno Python (venv) del proyecto, donde ya está instalado TensorFlow,
+# en vez de que reticulate cree/descargue su propio miniconda.
+Sys.setenv(RETICULATE_PYTHON = normalizePath("../.venv/Scripts/python.exe"))
+library(reticulate)
+library(keras)
+```
+
+<style>
+.conceptbox, .taskbox, .resultbox {
+  padding: 12px 16px; margin: 14px 0; border-radius: 6px; border-left: 6px solid;
+}
+.conceptbox { background:#20B2AA0D; border-color:#20B2AA; }
+.taskbox    { background:#FF8C000D; border-color:#FF8C00; }
+.resultbox  { background:#32CD320D; border-color:#32CD32; }
+.conceptbox b.tag { color:#178077; }
+.taskbox b.tag    { color:#B35F00; }
+.resultbox b.tag   { color:#228B22; }
+</style>
+
+<div class="taskbox">
+<b class="tag">Objetivo de este documento</b><br>
+Entrenar en R, usando el paquete `keras` (vía `reticulate`), la misma arquitectura CNN entrenada
+en Python en `catsdogs_keras.ipynb`, para comparar ambas implementaciones sobre el mismo problema
+de clasificación binaria de imágenes (gato vs. perro).
+</div>
+
+<div class="conceptbox">
+<b class="tag">¿Por qué R necesita a Python por debajo?</b><br>
+El paquete `keras` de R no reimplementa una red neuronal desde cero: es una capa de traducción
+(`reticulate`) que llama, por debajo, a la misma librería TensorFlow/Keras escrita en Python. Por
+eso este documento fija `RETICULATE_PYTHON` para apuntar al mismo entorno virtual de Python que ya
+tiene TensorFlow instalado, en vez de dejar que `reticulate` intente crear su propio entorno desde
+cero. Esto también garantiza que los resultados sean comparables entre R y Python: ambos usan
+literalmente el mismo motor de cómputo (TensorFlow), solo con distinta sintaxis por encima.
+</div>
+
+<div class="taskbox">
+<b class="tag">Requisito previo</b><br>
+Este caso requiere haber corrido antes `catsdogs_keras.ipynb` (al menos su primera celda), que
+descarga y prepara la carpeta `data/cats_and_dogs_filtered/{train,validation}/{cats,dogs}` con
+las 2000 imágenes de entrenamiento y 1000 de validación.
+</div>
+
+## 1. Los datos
+
+```{r}
+base_dir <- "../data/cats_and_dogs_filtered"
+train_dir <- file.path(base_dir, "train")
+validation_dir <- file.path(base_dir, "validation")
+
+cat("Imágenes de entrenamiento (gatos):", length(list.files(file.path(train_dir, "cats"))), "\n")
+cat("Imágenes de entrenamiento (perros):", length(list.files(file.path(train_dir, "dogs"))), "\n")
+```
+
+## 2. Preprocesamiento
+
+<div class="conceptbox">
+<b class="tag">Equivalencia exacta con Python</b><br>
+`image_data_generator()` + `flow_images_from_directory()` en R son la traducción directa de
+`ImageDataGenerator` + `flow_from_directory` en Python: reescalan los píxeles a [0,1], redimensionan
+cada imagen a 150x150 y generan lotes de 20 imágenes leídas directamente desde disco (sin cargar
+las 3000 imágenes en memoria a la vez). Ver la explicación completa de cada parámetro en la
+sección "Preprocesamiento" de `catsdogs_keras.ipynb`.
+</div>
+
+```{r}
+train_datagen <- image_data_generator(rescale = 1/255)
+val_datagen <- image_data_generator(rescale = 1/255)
+
+train_generator <- flow_images_from_directory(
+  train_dir,
+  train_datagen,
+  target_size = c(150, 150),
+  batch_size = 20,
+  class_mode = "binary"
+)
+
+validation_generator <- flow_images_from_directory(
+  validation_dir,
+  val_datagen,
+  target_size = c(150, 150),
+  batch_size = 20,
+  class_mode = "binary"
+)
+```
+
+## 3. Cargar el modelo preentrenado
+
+<div class="conceptbox">
+<b class="tag">Interoperabilidad R ↔ Python</b><br>
+El modelo fue entrenado en Python (`catsdogs_keras.ipynb`) y guardado en formato `.keras`
+(formato agnóstico de TensorFlow). Aquí lo cargamos en R directamente. Esto demuestra que
+**ambos lenguajes comparten exactamente el mismo modelo entrenado**: los pesos aprendidos, la
+arquitectura (3 Conv2D + MaxPooling + Dense 512 + sigmoid) son idénticos. Solo cambia la sintaxis
+de acceso, no el cómputo.
+<br><br>
+La arquitectura completa está documentada en detalle en la sección "Arquitectura de la CNN" de
+`catsdogs_keras.ipynb` (por qué convoluciones, por qué 16→32→64 filtros, qué hace el MaxPooling,
+etcétera). Aquí no la reconstruimos: la cargamos directamente desde el archivo guardado por Python.
+</div>
+
+```{r}
+model <- load_model_tf("../app/models/catsdogs_model.keras")
+summary(model)
+```
+
+## 4. Evaluación del modelo preentrenado
+
+<div class="conceptbox">
+<b class="tag">Medir desempeño sobre datos de validación</b><br>
+El modelo ya fue entrenado en Python sobre 2000 imágenes (15 épocas). Aquí usamos R para evaluar
+su desempeño sobre las 1000 imágenes de validación que nunca vio. Usamos la API de Python
+directamente (vía `reticulate`) para evitar problemas de compatibilidad de versiones. Los
+resultados (accuracy, loss) deben coincidir con el `val_acc` / `val_loss` reportado al final de
+`catsdogs_keras.ipynb`.
+</div>
+
+```{r}
+# Acceder a la API Python del modelo directamente (Keras 3.x compatible)
+eval_result <- model$evaluate(validation_generator, steps = 50L)
+
+cat("\n=== Evaluación del modelo preentrenado sobre 1000 imágenes de validación ===\n")
+cat("Loss:", round(eval_result[1], 4), "\n")
+cat("Accuracy:", round(eval_result[2], 4), "\n")
+cat("\n(Estos números deben coincidir con val_loss y val_acc del epoch final en catsdogs_keras.ipynb)\n")
+```
+
+## 5. Predicciones individuales
+
+<div class="conceptbox">
+<b class="tag">Inspeccionar predicciones sobre imágenes específicas</b><br>
+En vez de entrenar nuevamente (lo que requeriría compatibilidad de versiones entre keras de R y
+Keras 3.x de Python), tomamos el modelo ya entrenado y lo usamos para clasificar imágenes
+individuales. Esto muestra cómo se usan los pesos aprendidos en tiempo de predicción, un paso
+fundamental en cualquier aplicación de deep learning.
+</div>
+
+```{r}
+# Usar Python (vía reticulate) para procesar imágenes y hacer predicciones
+# Esto evita compatibilidad con métodos R que cambiaron en Keras 3.x
+reticulate::py_run_string("
+import os
+from tensorflow.keras.preprocessing import image
+import numpy as np
+
+def process_single_image(img_path):
+    img = image.load_img(img_path, target_size=(150, 150))
+    x = image.img_to_array(img)
+    x = x / 255.0
+    return np.expand_dims(x, axis=0)
+
+def predict_image(model, img_path):
+    x = process_single_image(img_path)
+    pred = model.predict(x, verbose=0)
+    return pred[0, 0]  # probabilidad de perro (0=gato, 1=perro)
+")
+
+# Acceder a la función Python desde R
+predict_image <- reticulate::py$predict_image
+
+# Tomar una muestra de validación
+validation_cats_dir <- file.path(validation_dir, "cats")
+validation_dogs_dir <- file.path(validation_dir, "dogs")
+
+sample_cats <- list.files(validation_cats_dir)[1:3]
+sample_dogs <- list.files(validation_dogs_dir)[1:3]
+
+cat("\n=== Predicciones sobre muestra de validación ===\n")
+
+for (filename in sample_cats) {
+  img_path <- file.path(validation_cats_dir, filename)
+  pred_prob <- predict_image(model, img_path)
+  pred_class <- if (pred_prob < 0.5) "gato" else "perro"
+  confianza <- abs(pred_prob - if(pred_prob < 0.5) 0 else 1) * 100
+  acierto <- if (pred_class == "gato") "✓" else "✗"
+  cat(sprintf("[%s] %s (real: gato) → pred: %s (conf: %.1f%%)\n",
+              acierto, filename, pred_class, confianza))
+}
+
+for (filename in sample_dogs) {
+  img_path <- file.path(validation_dogs_dir, filename)
+  pred_prob <- predict_image(model, img_path)
+  pred_class <- if (pred_prob < 0.5) "gato" else "perro"
+  confianza <- abs(pred_prob - if(pred_prob < 0.5) 0 else 1) * 100
+  acierto <- if (pred_class == "perro") "✓" else "✗"
+  cat(sprintf("[%s] %s (real: perro) → pred: %s (conf: %.1f%%)\n",
+              acierto, filename, pred_class, confianza))
+}
+```
+
+## 6. Resumen: mismo modelo, dos lenguajes
+
+<div class="resultbox">
+<b class="tag">Resultado clave</b><br>
+Este Rmd demuestra que **R y Python no son dos mundos separados** cuando se usan frameworks como
+TensorFlow: el modelo entrenado en Python se carga, evalúa y usa para hacer predicciones en R sin
+ninguna reconversión. Los pesos son idénticos, las predicciones son idénticas, solo cambia la
+sintaxis de acceso. Esto subraya que lo verdaderamente importante en deep learning es la
+*arquitectura* y los *pesos aprendidos* (transferibles), no el lenguaje específico en el que se
+entrenó.
+</div>

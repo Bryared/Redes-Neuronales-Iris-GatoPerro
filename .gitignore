@@ -1,0 +1,17 @@
+# Entorno virtual (cada quien lo recrea con requirements.txt)
+.venv/
+
+# Dataset descargado (~800 MB, se regenera corriendo la 1ra celda del notebook)
+data/
+
+# Cachés de Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Checkpoint intermedio de entrenamiento (nos quedamos solo con catsdogs_model.keras)
+app/models/catsdogs_model_best.keras
+
+# Sistema
+.DS_Store
+Thumbs.db

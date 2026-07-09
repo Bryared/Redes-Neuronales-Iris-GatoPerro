@@ -1,0 +1,175 @@
+---
+title: "Caso 1 - Clasificación Iris con neuralnet (R)"
+author: "Bryan Vargas"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+/* Esquema de colores: turquesa = concepto/teoría, naranja = objetivo de la
+   sección, verde = resultado clave. Mismo esquema usado en todo el proyecto. */
+.conceptbox, .taskbox, .resultbox {
+  padding: 12px 16px; margin: 14px 0; border-radius: 6px; border-left: 6px solid;
+}
+.conceptbox { background:#20B2AA0D; border-color:#20B2AA; }
+.taskbox    { background:#FF8C000D; border-color:#FF8C00; }
+.resultbox  { background:#32CD320D; border-color:#32CD32; }
+.conceptbox b.tag { color:#178077; }
+.taskbox b.tag    { color:#B35F00; }
+.resultbox b.tag   { color:#228B22; }
+</style>
+
+<div class="taskbox">
+<b class="tag">Objetivo de este documento</b><br>
+Entrenar y evaluar, en R, una red neuronal (perceptrón multicapa) que clasifique flores Iris en
+sus 3 especies (setosa, versicolor, virginica) a partir de 4 medidas físicas, replicando el
+ejemplo de las slides de clase con el paquete <code>neuralnet</code>.
+</div>
+
+## 1. Los datos
+
+<div class="conceptbox">
+<b class="tag">¿Por qué estos datos y por qué dividir en entrenamiento/validación?</b><br>
+El dataset Iris tiene 150 observaciones con 4 variables predictoras continuas
+(<code>Sepal.Length</code>, <code>Sepal.Width</code>, <code>Petal.Length</code>,
+<code>Petal.Width</code>) y una variable de clase (<code>Species</code>) con 3 niveles.
+Dividimos la muestra en 70% entrenamiento / 30% validación para poder medir qué tan bien
+generaliza la red a datos que <em>no vio</em> durante el ajuste de pesos: si evaluáramos sobre
+los mismos datos de entrenamiento, la red podría simplemente "memorizar" y la tasa de error no
+reflejaría su capacidad predictiva real (sobreajuste).
+</div>
+
+```{r}
+library(neuralnet)
+
+data(iris)
+```
+
+<div class="conceptbox">
+<b class="tag">¿Por qué codificar la especie como 3 columnas binarias (one-hot)?</b><br>
+El paquete <code>neuralnet</code> necesita que la variable de salida sea numérica. Como tenemos
+3 clases sin orden natural entre ellas, la codificación estándar es <em>one-hot</em>: cada
+observación se representa con 3 indicadores binarios (<code>setosa</code>, <code>versicolor</code>,
+<code>virginica</code>), donde exactamente uno vale 1 (la clase verdadera) y los otros dos valen 0.
+La red tendrá entonces 3 neuronas de salida, una por clase, y la predicción final será la clase
+cuya neurona de salida tenga el valor más alto (similar a una función softmax).
+</div>
+
+```{r}
+iris$setosa     <- iris$Species == "setosa"
+iris$virginica  <- iris$Species == "virginica"
+iris$versicolor <- iris$Species == "versicolor"
+
+set.seed(123) # semilla fija para que el split sea reproducible
+iris.train.idx <- sample(x = nrow(iris), size = nrow(iris) * 0.70)
+iris.train <- iris[iris.train.idx, ]
+iris.valid <- iris[-iris.train.idx, ]
+
+dim(iris.train)
+dim(iris.valid)
+```
+
+## 2. Entrenamiento de la red
+
+<div class="conceptbox">
+<b class="tag">¿Qué significa la arquitectura <code>hidden = c(10, 10)</code>?</b><br>
+Especifica <b>2 capas ocultas</b>, cada una con <b>10 neuronas</b>. La información fluye así:
+<br>4 entradas (las medidas) &rarr; capa oculta 1 (10 neuronas) &rarr; capa oculta 2 (10 neuronas)
+&rarr; 3 salidas (una por especie).
+<br>Cada neurona oculta calcula una combinación lineal de sus entradas más un sesgo (<i>bias</i>,
+representado en el diagrama por el nodo azul marcado "1"), le aplica una función de activación no
+lineal, y pasa el resultado a la siguiente capa. Son estas no linealidades encadenadas las que
+permiten a la red aprender fronteras de decisión curvas, imposibles para un modelo lineal simple.
+<br><br>
+Otros argumentos clave:
+<ul>
+<li><code>err.fct = "ce"</code>: usa entropía cruzada (<i>cross-entropy</i>) como función de error,
+la elección natural para problemas de clasificación (en vez del error cuadrático medio, más propio
+de regresión).</li>
+<li><code>linear.output = FALSE</code>: aplica una función de activación no lineal también en la
+capa de salida (necesario para que las salidas se comporten como probabilidades, no como valores
+sin acotar).</li>
+<li><code>rep = 5</code>: entrena la red 5 veces con distintos pesos iniciales aleatorios y luego
+puede quedarse con la mejor (<code>plot(..., rep="best")</code>), ya que el algoritmo de
+retropropagación puede converger a distintos óptimos locales según el punto de partida.</li>
+<li><code>stepmax</code> y <code>threshold</code>: controlan, respectivamente, el número máximo de
+iteraciones permitidas y el criterio de convergencia (qué tan pequeño debe ser el cambio en el
+error para considerar que la red ya aprendió).</li>
+</ul>
+</div>
+
+```{r}
+iris.net <- neuralnet(
+  setosa + versicolor + virginica ~
+    Sepal.Length + Sepal.Width + Petal.Length + Petal.Width,
+  data = iris.train,
+  hidden = c(10, 10),
+  rep = 5,
+  err.fct = "ce",
+  linear.output = FALSE,
+  lifesign = "minimal",
+  stepmax = 1000000,
+  threshold = 0.001
+)
+```
+
+<div class="conceptbox">
+<b class="tag">Cómo leer el diagrama de la red</b><br>
+Cada línea representa un peso (el número junto a ella es su valor numérico aprendido); las líneas
+azules que parten de los círculos marcados "1" son los sesgos de cada neurona. Pesos con valor
+absoluto grande indican que esa conexión tiene mucha influencia en la neurona destino; el signo
+indica si la relación es excitatoria (positiva) o inhibitoria (negativa).
+</div>
+
+```{r, fig.width=12, fig.height=8}
+plot(iris.net, rep = "best")
+```
+
+## 3. Predicción y evaluación
+
+<div class="conceptbox">
+<b class="tag">De probabilidades a una clase concreta</b><br>
+<code>compute()</code> propaga cada observación de validación a través de la red ya entrenada y
+devuelve, para cada una, las 3 activaciones de salida (que se comportan como "puntajes" de cada
+especie). <code>which.max</code> por fila elige la especie con mayor puntaje: esa es la predicción
+final de la red.
+</div>
+
+```{r}
+iris.prediccion <- compute(iris.net, iris.valid[, 1:4])
+idx <- apply(iris.prediccion$net.result, 1, which.max)
+predicted <- c("setosa", "versicolor", "virginica")[idx]
+
+table(predicted, iris.valid$Species)
+```
+
+<div class="conceptbox">
+<b class="tag">Cómo leer la matriz de confusión</b><br>
+Las filas son las predicciones de la red y las columnas la especie real. Los valores en la
+diagonal son aciertos; cualquier valor fuera de la diagonal es una confusión entre dos especies
+(por ejemplo, una <i>versicolor</i> real clasificada como <i>virginica</i>). Es normal que la
+mayor confusión ocurra entre <i>versicolor</i> y <i>virginica</i>, ya que estas dos especies se
+solapan más en sus medidas de pétalo que <i>setosa</i>, que es fácilmente separable.
+</div>
+
+```{r}
+te <- mean(predicted != iris.valid$Species)
+cat("Tasa de error:", te, "\n")
+cat("Accuracy:", 1 - te, "\n")
+```
+
+<div class="resultbox">
+<b class="tag">Resultado clave</b><br>
+La tasa de error y el accuracy calculados arriba, junto con la matriz de confusión, resumen el
+desempeño de esta red de 2 capas ocultas de 10 neuronas sobre el 30% de datos de validación que
+nunca participaron en el entrenamiento. Este mismo procedimiento (arquitectura, split, métricas)
+se replica en Python en <a href="../caso1_iris/iris_keras.ipynb"><code>iris_keras.ipynb</code></a>
+para comparar ambas implementaciones.
+</div>

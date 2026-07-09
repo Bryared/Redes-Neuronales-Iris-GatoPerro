@@ -1,0 +1,14 @@
+tensorflow==2.16.1
+scikit-learn
+pandas
+numpy
+matplotlib
+seaborn
+jupyter
+nbconvert
+streamlit
+pillow
+requests
+dash
+dash-bootstrap-components
+gunicorn
